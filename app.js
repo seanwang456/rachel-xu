@@ -64,21 +64,34 @@ function render(){const n=projects.length;if(!n)return;const width=workWidth();
   if(!blur&&abs>1.25)blur=true;else if(blur&&abs<1.05)blur=false;
   if(b._b!==blur){b.style.filter=blur?'blur(1.1px)':'none';b._b=blur}
   const act=i===activeWork;if(b._a!==act){b.dataset.active=String(act);b.setAttribute('aria-pressed',String(act));b._a=act}})}
-function kick(){lastT=performance.now();if(!rafId)rafId=requestAnimationFrame(tick)}
+function kick(){if(!rafId){lastT=performance.now();rafId=requestAnimationFrame(tick)}}
 function tick(t){rafId=requestAnimationFrame(tick);const dt=Math.min(50,t-lastT);lastT=t;
  const moving=dragging||springTarget!==null||vel!==0;
  const etx=moving?cameraX:(paused?0:camTX),ety=moving?cameraY:(paused?0:camTY),ease=1-Math.exp(-dt*.008);
  cameraX+=(etx-cameraX)*ease;cameraY+=(ety-cameraY)*ease;
  if(Math.abs(etx-cameraX)<.02)cameraX=etx;if(Math.abs(ety-cameraY)<.02)cameraY=ety;
  if(!dragging){
-  // One-time inertia→snap handoff: keep residual velocity (no dead-stop catch)
-  // and pick the landing tooth in the direction of motion (no yank-back).
-  if(springTarget!==null){vel+=((springTarget-pos)*.0002-vel*.028)*dt;pos+=vel*dt;if(Math.abs(springTarget-pos)<.002&&Math.abs(vel)<.0002){pos=springTarget;vel=0;springTarget=null}}
-  else if(vel!==0){pos+=vel*dt;vel*=Math.exp(-.0032*dt);if(Math.abs(vel)<.0006)springTarget=Math.round(pos+vel*180)}
+  // Exact critically damped solution, in milliseconds. Euler stepping made
+  // damping alternate at long frame intervals, causing visible stutter.
+  if(springTarget!==null){
+   const omega=.014,offset=pos-springTarget,c=vel+omega*offset,decay=Math.exp(-omega*dt);
+   pos=springTarget+(offset+c*dt)*decay;
+   vel=(vel-omega*c*dt)*decay;
+   if(Math.abs(springTarget-pos)<.002&&Math.abs(vel)<.0002){pos=springTarget;vel=0;springTarget=null}
+  }else if(vel!==0){
+   const decay=Math.exp(-.0032*dt);
+   pos+=vel*(1-decay)/.0032;vel*=decay;
+   if(Math.abs(vel)<.0006){
+    // Keep enough distance to absorb residual speed without overshooting.
+    // round() could select a tooth behind us and yank the artwork backwards.
+    const landing=pos+vel/.014;
+    springTarget=vel>0?Math.ceil(landing):Math.floor(landing);
+   }
+  }
  }
  render();
  if(!dragging&&springTarget===null&&!vel&&cameraX===etx&&cameraY===ety){cancelAnimationFrame(rafId);rafId=0}}
-function animateToIndex(i){if(!projects.length)return;const n=projects.length,cur=((pos%n)+n)%n;let delta=i-cur;if(delta>n/2)delta-=n;if(delta<-n/2)delta+=n;if(paused){pos+=delta;vel=0;springTarget=null;render();return}springTarget=pos+delta;vel=Math.max(-.003,Math.min(.003,delta*.002+vel*.25));kick()}
+function animateToIndex(i){if(!projects.length)return;const n=projects.length;let delta=(i-pos)%n;if(delta>n/2)delta-=n;if(delta<-n/2)delta+=n;if(paused){pos+=delta;vel=0;springTarget=null;render();return}springTarget=pos+delta;vel=Math.sign(delta)*Math.min(.003,Math.abs(delta)*.014,Math.abs(delta*.002+vel*.25));kick()}
 const selectWork=animateToIndex;
 $('#prev-work').onclick=()=>animateToIndex(Math.round(springTarget??pos)-1);$('#next-work').onclick=()=>animateToIndex(Math.round(springTarget??pos)+1);$('#enter-exhibit').onclick=()=>{if(!projects.length)return;const n=projects.length,i=((Math.round(springTarget??pos)%n)+n)%n;openProject(projects[i],$('#enter-exhibit'))};$('#reset-view').onclick=()=>{camTX=camTY=0;animateToIndex(0)};
 const gallery=$('#spatial-gallery');
