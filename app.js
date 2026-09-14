@@ -42,23 +42,46 @@ function soundLab(host){host.innerHTML='<p class="eyebrow">LISTENING STUDY / 网
  let c=host.querySelector('canvas'),ctx=c.getContext('2d'),audio,analyser,gain,panner,playing=false,pan=0,id,alive=true;c.width=900;c.height=320;const play=host.querySelector('[data-play]');async function toggle(){try{if(!audio){audio=new AudioContext();gain=audio.createGain();gain.gain.value=+host.querySelector('input').value;panner=audio.createStereoPanner();panner.pan.value=pan;analyser=audio.createAnalyser();analyser.fftSize=512;[174.61,261.63,349.23].forEach((f,i)=>{let o=audio.createOscillator(),g=audio.createGain();o.type='sine';o.frequency.value=f;g.gain.value=.22;o.connect(g).connect(gain);o.start()});gain.connect(panner).connect(analyser).connect(audio.destination)}if(playing)await audio.suspend();else await audio.resume();playing=!playing;play.textContent=playing?'暂停声音':'开启声音';play.setAttribute('aria-pressed',String(playing));if(playing)draw()}catch(e){play.textContent='声音无法开启，请重试'}}play.onclick=toggle;host.querySelectorAll('[data-pan]').forEach(b=>b.onclick=()=>{pan=+b.dataset.pan;if(panner)panner.pan.setTargetAtTime(pan,audio.currentTime,.15);host.querySelectorAll('[data-pan]').forEach(x=>x.setAttribute('aria-pressed',String(x===b)));if(!playing)still()});host.querySelector('input').oninput=e=>{if(gain)gain.gain.setTargetAtTime(+e.target.value,audio.currentTime,.05)};function still(){ctx.fillStyle='#0a0d0e';ctx.fillRect(0,0,900,320);ctx.fillStyle='#9dacb0';ctx.beginPath();ctx.arc(450+pan*230,160,3,0,7);ctx.fill()}function draw(){if(!alive||!playing)return;still();let d=new Uint8Array(analyser.frequencyBinCount);analyser.getByteFrequencyData(d);for(let i=0;i<150;i++){let a=i/150*Math.PI*2,r=40+d[i%d.length]*.55;ctx.fillStyle='rgba(160,183,186,.55)';ctx.fillRect(450+pan*230+Math.cos(a)*r,160+Math.sin(a)*r*.65,1.5,1.5)}id=requestAnimationFrame(draw)}still();return()=>{alive=false;cancelAnimationFrame(id);if(audio)audio.close()}}
 // Spatial exhibition: continuous wrap-around carousel. pos is in work units;
 // drags track 1:1 with gear-tooth detent resistance, release glides and snaps.
+// Caption/active/blur follow a hysteresis-based activeWork, and the snap spring
+// is critically damped, so nothing flickers or oscillates near boundaries.
 let activeWork=0,spatialButtons=[],cameraX=0,cameraY=0,camTX=0,camTY=0;
 let pos=0,vel=0,springTarget=null,dragging=false,dragMoved=false,activePtr=null,downX=0,lastX=0,samples=[],rafId=0,lastT=0;
 const DETENT=.3,workWidth=()=>innerWidth<700?innerWidth*.6:innerWidth*.29,pxPerWork=()=>workWidth()*.94;
 function buildExhibition(data){const gallery=$('#spatial-gallery');data.forEach((p,i)=>{let b=document.createElement('button');b.className='spatial-art';b.style.setProperty('--i',i);b.innerHTML='<img draggable="false" src="assets/'+p.cover+'" alt="'+p.name+'作品"><span class="art-label">'+p.name+'</span>';b.setAttribute('aria-label','选择作品：'+p.name);b.onclick=()=>{if(dragMoved)return;if(activeWork===i)openProject(p,b);else selectWork(i)};gallery.append(b);spatialButtons.push(b)});syncCaption();render()}
 function syncCaption(){const p=projects[activeWork];$('#exhibit-count').textContent=String(activeWork+1).padStart(2,'0')+' / '+String(projects.length).padStart(2,'0');$('#exhibit-name').textContent=p.name;$('#exhibit-category').textContent=p.category;const cap=$('.exhibit-caption');cap.classList.remove('tick');void cap.offsetWidth;cap.classList.add('tick')}
-function render(){const n=projects.length;if(!n)return;const width=workWidth();spatialButtons.forEach((b,i)=>{let d=i-pos;d-=Math.round(d/n)*n;const abs=Math.abs(d),x=d*width*.94;b.style.transform=`translate(-50%,-50%) translate3d(${x+cameraX*(abs+1)}px,${abs*20+cameraY}px,${-abs*230}px) rotateY(${-d*13+cameraX*.06}deg)`;b.style.opacity=String(Math.max(0,(1-abs*.23)*Math.min(1,Math.max(0,(2.6-abs)/.6))));const blur=Math.min(1.6,Math.max(0,(abs-.85)*1.1));b.style.filter=blur?'blur('+blur.toFixed(2)+'px)':'none';const off=abs>2.6;b.style.pointerEvents=off?'none':'auto';b.tabIndex=off?-1:0;b.dataset.active=String(abs<.5);b.setAttribute('aria-pressed',String(abs<.5))});const r=((Math.round(pos)%n)+n)%n;if(r!==activeWork){activeWork=r;syncCaption();if(dragging)navigator.vibrate?.(8)}}
+function render(){const n=projects.length;if(!n)return;const width=workWidth();
+ const g=Math.round(pos),c=((g%n)+n)%n;
+ if(c!==activeWork&&Math.abs(pos-g)<=.46){activeWork=c;syncCaption();if(dragging)navigator.vibrate?.(8)}
+ spatialButtons.forEach((b,i)=>{let d=i-pos;d-=Math.round(d/n)*n;const abs=Math.abs(d),x=d*width*.94;
+  const t=`translate(-50%,-50%) translate3d(${x+cameraX*(abs+1)}px,${abs*20+cameraY}px,${-abs*230}px) rotateY(${-d*13+cameraX*.06}deg)`;
+  if(b._t!==t){b.style.transform=t;b._t=t}
+  const o=Math.max(0,(1-abs*.23)*Math.min(1,Math.max(0,(2.6-abs)/.6))).toFixed(3);
+  if(b._o!==o){b.style.opacity=o;b._o=o}
+  const blur=abs>1.15;if(b._b!==blur){b.style.filter=blur?'blur(1.1px)':'none';b._b=blur}
+  const off=abs>2.6;if(b._off!==off){b.style.pointerEvents=off?'none':'auto';b.tabIndex=off?-1:0;b._off=off}
+  const act=i===activeWork;if(b._a!==act){b.dataset.active=String(act);b.setAttribute('aria-pressed',String(act));b._a=act}})}
 function kick(){lastT=performance.now();if(!rafId)rafId=requestAnimationFrame(tick)}
-function tick(t){rafId=requestAnimationFrame(tick);const dt=Math.min(50,t-lastT);lastT=t;const etx=paused?0:camTX,ety=paused?0:camTY;cameraX+=(etx-cameraX)*.14;cameraY+=(ety-cameraY)*.14;if(Math.abs(etx-cameraX)<.02)cameraX=etx;if(Math.abs(ety-cameraY)<.02)cameraY=ety;
- if(!dragging){if(springTarget!==null){vel+=((springTarget-pos)*.00013-vel*.019)*dt;pos+=vel*dt;if(Math.abs(springTarget-pos)<.0015&&Math.abs(vel)<.0001){pos=springTarget;vel=0;springTarget=null}}else{pos+=vel*dt;vel*=Math.exp(-.003*dt);if(Math.abs(vel)<.0005){vel=0;springTarget=Math.round(pos)}}}
- render();if(!dragging&&springTarget===null&&!vel&&cameraX===etx&&cameraY===ety){cancelAnimationFrame(rafId);rafId=0}}
-function animateToIndex(i){if(!projects.length)return;const n=projects.length,cur=((pos%n)+n)%n;let delta=i-cur;if(delta>n/2)delta-=n;if(delta<-n/2)delta+=n;if(paused){pos+=delta;vel=0;springTarget=null;render();return}springTarget=pos+delta;vel=Math.max(-.005,Math.min(.005,delta*.0035+vel*.3));kick()}
+function tick(t){rafId=requestAnimationFrame(tick);const dt=Math.min(50,t-lastT);lastT=t;
+ const etx=paused?0:camTX,ety=paused?0:camTY,ease=1-Math.exp(-dt*.008);
+ cameraX+=(etx-cameraX)*ease;cameraY+=(ety-cameraY)*ease;
+ if(Math.abs(etx-cameraX)<.02)cameraX=etx;if(Math.abs(ety-cameraY)<.02)cameraY=ety;
+ if(!dragging){
+  if(springTarget!==null){vel+=((springTarget-pos)*.00013-vel*.023)*dt;pos+=vel*dt;if(Math.abs(springTarget-pos)<.002&&Math.abs(vel)<.0002){pos=springTarget;vel=0;springTarget=null}}
+  else{pos+=vel*dt;vel*=Math.exp(-.0032*dt);if(Math.abs(vel)<.0006)springTarget=Math.round(pos)}
+ }
+ render();
+ if(!dragging&&springTarget===null&&!vel&&cameraX===etx&&cameraY===ety){cancelAnimationFrame(rafId);rafId=0}}
+function animateToIndex(i){if(!projects.length)return;const n=projects.length,cur=((pos%n)+n)%n;let delta=i-cur;if(delta>n/2)delta-=n;if(delta<-n/2)delta+=n;if(paused){pos+=delta;vel=0;springTarget=null;render();return}springTarget=pos+delta;vel=Math.max(-.0035,Math.min(.0035,delta*.0025+vel*.25));kick()}
 const selectWork=animateToIndex;
 $('#prev-work').onclick=()=>animateToIndex(Math.round(springTarget??pos)-1);$('#next-work').onclick=()=>animateToIndex(Math.round(springTarget??pos)+1);$('#enter-exhibit').onclick=()=>{if(!projects.length)return;const n=projects.length,i=((Math.round(springTarget??pos)%n)+n)%n;openProject(projects[i],$('#enter-exhibit'))};$('#reset-view').onclick=()=>{camTX=camTY=0;animateToIndex(0)};
 const gallery=$('#spatial-gallery');
-gallery.addEventListener('pointerdown',e=>{if(dragging||e.button>0)return;dragging=true;dragMoved=false;activePtr=e.pointerId;downX=lastX=e.clientX;vel=0;springTarget=null;camTX=camTY=0;samples=[[performance.now(),e.clientX]];gallery.classList.add('grabbing');kick()});
+gallery.addEventListener('pointerdown',e=>{if(dragging||e.button>0)return;dragging=true;dragMoved=false;activePtr=e.pointerId;downX=lastX=e.clientX;vel=0;springTarget=null;samples=[[performance.now(),e.clientX]];gallery.classList.add('grabbing');kick()});
 gallery.addEventListener('pointermove',e=>{if(dragging&&e.pointerId===activePtr){const dx=e.clientX-lastX;lastX=e.clientX;samples.push([performance.now(),e.clientX]);if(samples.length>6)samples.shift();if(!dragMoved&&Math.abs(e.clientX-downX)>6){dragMoved=true;try{gallery.setPointerCapture(activePtr)}catch(_){}}pos-=dx/pxPerWork()*(1-DETENT*Math.sin(Math.PI*pos)**2)}else if(!dragging&&!paused&&e.pointerType==='mouse'){camTX=(e.clientX/innerWidth-.5)*18;camTY=(e.clientY/innerHeight-.5)*10;kick()}});
-const endDrag=e=>{if(!dragging||e.pointerId!==activePtr)return;dragging=false;gallery.classList.remove('grabbing');const now=performance.now(),old=samples.find(s=>now-s[0]<120)||samples[0];vel=Math.max(-.006,Math.min(.006,(old[1]-lastX)/Math.max(1,now-old[0])/pxPerWork()));if(Math.abs(vel)<.0006)vel=0;if(paused){pos=Math.round(pos);vel=0;render()}else if(!vel)springTarget=Math.round(pos);kick();setTimeout(()=>dragMoved=false,50)};
+const endDrag=e=>{if(!dragging||e.pointerId!==activePtr)return;dragging=false;gallery.classList.remove('grabbing');
+ if(e.type==='pointercancel')vel=0;
+ else{const now=performance.now(),old=samples.find(s=>now-s[0]<=90)||samples[0];vel=Math.max(-.0045,Math.min(.0045,(old[1]-lastX)/Math.max(1,now-old[0])/pxPerWork()));if(Math.abs(vel)<.0006)vel=0}
+ if(paused){pos=Math.round(pos);vel=0;render()}else if(!vel)springTarget=Math.round(pos);
+ kick();setTimeout(()=>dragMoved=false,50)};
 gallery.addEventListener('pointerup',endDrag);gallery.addEventListener('pointercancel',endDrag);
 gallery.addEventListener('pointerleave',()=>{if(!dragging){camTX=camTY=0;kick()}});
 gallery.addEventListener('keydown',e=>{if(e.key==='ArrowRight'){e.preventDefault();animateToIndex(Math.round(springTarget??pos)+1)}if(e.key==='ArrowLeft'){e.preventDefault();animateToIndex(Math.round(springTarget??pos)-1)}});
